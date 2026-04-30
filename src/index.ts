@@ -129,6 +129,7 @@ function toAssetPathFromHtml(
 }
 
 const legacyEnvVarMarker = `__VITE_IS_LEGACY__`
+const modernEnvVarMarker = `__VITE_IS_MODERN__`
 
 const $require = createRequire(import.meta.url)
 
@@ -611,7 +612,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
           transform: {
             optimizer: {
               globals: {
-                vars: { [legacyEnvVarMarker]: 'true' },
+                vars: { [legacyEnvVarMarker]: 'true', [modernEnvVarMarker]: 'false' },
               },
             },
           },
