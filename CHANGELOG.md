@@ -1,5 +1,12 @@
 
 
+## [2.0.2](https://github.com/CyanSalt/vite-plugin-legacy-swc/compare/v2.0.1...v2.0.2) (2026-05-07)
+
+### Bug Fixes
+
+* fallback exports ([882bdf3](https://github.com/CyanSalt/vite-plugin-legacy-swc/commit/882bdf3172fe506aa1086f5404a8a2c33092025f))
+* skip preload helper in legacy chunks, https://github.com/vitejs/vite/pull/21607/changes ([8b0b6be](https://github.com/CyanSalt/vite-plugin-legacy-swc/commit/8b0b6be7961025bc4d2c189e486ee5240be8caf8))
+
 ## [2.0.1](https://github.com/CyanSalt/vite-plugin-legacy-swc/compare/v2.0.0...v2.0.1) (2025-11-04)
 
 ### Bug Fixes
