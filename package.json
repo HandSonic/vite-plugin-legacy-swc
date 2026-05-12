@@ -39,6 +39,24 @@
     "url": "https://github.com/CyanSalt/vite-plugin-legacy-swc/issues"
   },
   "homepage": "https://github.com/CyanSalt/vite-plugin-legacy-swc#readme",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^24.15.0",
+      "onFail": "error"
+    },
+    "packageManager": [
+      {
+        "name": "pnpm",
+        "version": "^11.0.0",
+        "onFail": "error"
+      },
+      {
+        "name": "npm",
+        "onFail": "ignore"
+      }
+    ]
+  },
   "dependencies": {
     "@swc/core": "^1.10.1",
     "browserslist": "^4.24.3",
