@@ -219,9 +219,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
 
     async config(config, env) {
       if (env.command === 'build' && !config.build?.ssr) {
-        if (!config.build) {
-          config.build = {}
-        }
+        config.build ??= {}
 
         if (genLegacy && !config.build.cssTarget) {
           // Hint for esbuild that we are targeting legacy browsers when minifying CSS.
@@ -1041,8 +1039,7 @@ function recordAndRemovePolyfillSwcPlugin(
       if (node.type === 'VariableDeclaration') {
         node.declarations = node.declarations.filter((declaration) => {
           if (
-            declaration.init
-            && declaration.init.type === 'CallExpression'
+            declaration.init?.type === 'CallExpression'
             && declaration.init.callee.type === 'Identifier'
             && declaration.init.callee.value === 'require'
             && declaration.init.arguments[0].expression.type === 'StringLiteral'
