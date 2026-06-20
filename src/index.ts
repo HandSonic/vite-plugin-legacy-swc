@@ -623,6 +623,8 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
         swcrc: false,
         configFile: false,
         sourceMaps,
+        // chain the sourcemap back to the original source through Pass 1
+        inputSourceMap: systemResult.map,
         env: createSwcEnvOptions(targets, {
           needPolyfills,
         }),
@@ -953,7 +955,8 @@ async function buildPolyfillChunk({
       },
     })
     finalCode = minifyResult.code
-    finalMap = minifyResult.map
+    // swc returns map as a string; rollup expects a SourceMap object
+    finalMap = minifyResult.map ? JSON.parse(minifyResult.map) : undefined
   }
 
   // associate the polyfill chunk to every entry chunk so that we can retrieve
