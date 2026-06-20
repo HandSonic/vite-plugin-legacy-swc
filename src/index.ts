@@ -6,7 +6,6 @@ import type {
   EnvConfig,
   JsMinifyOptions,
   Statement,
-  Options as SwcOptions,
   Plugin as SwcPlugin,
 } from '@swc/core'
 import browserslist from 'browserslist'
@@ -301,7 +300,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
     name: 'vite:legacy-generate-polyfill-chunk',
     apply: 'build',
 
-    async generateBundle(opts, bundle) {
+    async generateBundle(this: Rollup.PluginContext, opts, bundle) {
       if (resolvedConfig.build.ssr) {
         return
       }
@@ -329,6 +328,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
           )
         }
         await buildPolyfillChunk({
+          ctx: this,
           mode: resolvedConfig.mode,
           imports: modernPolyfills,
           bundle,
@@ -372,6 +372,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
         }
 
         await buildPolyfillChunk({
+          ctx: this,
           mode: resolvedConfig.mode,
           imports: legacyPolyfills,
           bundle,
@@ -458,7 +459,7 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
       ): Rollup.OutputOptions => {
         return {
           ...outputOptions,
-          format: 'system',
+          format: 'esm',
           entryFileNames: getLegacyOutputFileName(outputOptions.entryFileNames),
           chunkFileNames: getLegacyOutputFileName(outputOptions.chunkFileNames),
         }
@@ -574,14 +575,6 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
       // transform the legacy chunk with @swc/core
       const sourceMaps = Boolean(resolvedConfig.build.sourcemap)
       const swc = await loadSwc()
-      const swcOptions: SwcOptions = {
-        swcrc: false,
-        configFile: false,
-        sourceMaps,
-        env: createSwcEnvOptions(targets, {
-          needPolyfills,
-        }),
-      }
       const minifyOptions: JsMinifyOptions = {
         compress: {
           // Different defaults between terser and swc
@@ -596,8 +589,15 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
         module: opts.format.startsWith('es'),
         toplevel: opts.format === 'cjs',
       }
-      const transformResult = await swc.transform(raw, {
-        ...swcOptions,
+
+      // Pass 1: ESM → SystemJS + env var replacement + mangle
+      const systemResult = await swc.transform(raw, {
+        swcrc: false,
+        configFile: false,
+        sourceMaps,
+        module: {
+          type: 'systemjs',
+        },
         inputSourceMap: undefined,
         minify: Boolean(resolvedConfig.build.minify && minifyOptions.mangle),
         jsc: {
@@ -616,14 +616,29 @@ function viteLegacyPlugin(options: Options = {}): Plugin[] {
           },
         },
       })
+
+      // Pass 2: inject polyfills into the SystemJS output
+      // (polyfills will be import declarations, not System.register deps)
+      const polyfillResult = await swc.transform(systemResult.code, {
+        swcrc: false,
+        configFile: false,
+        sourceMaps,
+        env: createSwcEnvOptions(targets, {
+          needPolyfills,
+        }),
+      })
+
+      // collect and remove polyfill imports, then wrap in IIFE
       const plugin = swc.plugins([
         recordAndRemovePolyfillSwcPlugin(polyfillsDiscovered.legacy),
         wrapIIFESwcPlugin(),
       ])
-      const ast = await swc.parse(transformResult.code)
+      const ast = await swc.parse(polyfillResult.code)
       const result = await swc.print(plugin(ast), {
-        ...swcOptions,
-        inputSourceMap: transformResult.map,
+        swcrc: false,
+        configFile: false,
+        sourceMaps,
+        inputSourceMap: polyfillResult.map,
         minify: Boolean(resolvedConfig.build.minify && minifyOptions.compress),
         jsc: {
           // compress only
@@ -839,6 +854,7 @@ function createSwcEnvOptions(
 const polyfillId = '\0vite/legacy-polyfills'
 
 async function buildPolyfillChunk({
+  ctx,
   mode,
   imports,
   bundle,
@@ -849,6 +865,7 @@ async function buildPolyfillChunk({
   excludeSystemJS,
   prependModernChunkLegacyGuard,
 }: {
+  ctx: Rollup.PluginContext,
   mode: string,
   imports: Set<string>,
   bundle: Rollup.OutputBundle,
@@ -906,6 +923,9 @@ async function buildPolyfillChunk({
     (chunk) => chunk.type === 'chunk' && chunk.isEntry,
   ) as Rollup.OutputChunk
 
+  let finalCode = polyfillChunk.code
+  let finalMap = polyfillChunk.map ?? undefined
+
   if (minify) {
     const swc = await loadSwc()
     const sourceMaps = Boolean(sourcemap)
@@ -932,20 +952,32 @@ async function buildPolyfillChunk({
         minify: minifyOptions,
       },
     })
-    Object.assign(polyfillChunk, minifyResult)
+    finalCode = minifyResult.code
+    finalMap = minifyResult.map
   }
 
   // associate the polyfill chunk to every entry chunk so that we can retrieve
   // the polyfill filename in index html transform
-  for (const key of Object.keys(bundle)) {
+  for (const key in bundle) {
     const chunk = bundle[key]
     if (chunk.type === 'chunk' && chunk.facadeModuleId) {
       facadeToChunkMap.set(chunk.facadeModuleId, polyfillChunk.fileName)
     }
   }
 
-  // add the chunk to the bundle
-  bundle[polyfillChunk.fileName] = polyfillChunk
+  // add the chunk to the bundle using emitFile for Rolldown compatibility
+  ctx.emitFile({
+    type: 'prebuilt-chunk',
+    name: polyfillChunk.name,
+    fileName: polyfillChunk.fileName,
+    code: finalCode,
+    facadeModuleId: polyfillChunk.facadeModuleId ?? undefined,
+    isEntry: polyfillChunk.isEntry,
+    isDynamicEntry: polyfillChunk.isDynamicEntry,
+    exports: [],
+    map: finalMap,
+    sourcemapFileName: polyfillChunk.sourcemapFileName ?? undefined,
+  })
   if (polyfillChunk.sourcemapFileName) {
     const polyfillChunkMapAsset = rollupOutput.output.find(
       (chunk) =>
@@ -953,7 +985,11 @@ async function buildPolyfillChunk({
         && chunk.fileName === polyfillChunk.sourcemapFileName,
     ) as Rollup.OutputAsset | undefined
     if (polyfillChunkMapAsset) {
-      bundle[polyfillChunk.sourcemapFileName] = polyfillChunkMapAsset
+      ctx.emitFile({
+        type: 'asset',
+        fileName: polyfillChunkMapAsset.fileName,
+        source: polyfillChunkMapAsset.source,
+      })
     }
   }
 
@@ -1006,24 +1042,20 @@ function prependModernChunkLegacyGuardPlugin(): Plugin {
 
 function isLegacyChunk(
   chunk: Rollup.RenderedChunk,
-  options: Rollup.NormalizedOutputOptions,
+  _options: Rollup.NormalizedOutputOptions,
 ) {
-  return options.format === 'system' && chunk.fileName.includes('-legacy')
+  return chunk.fileName.includes('-legacy')
 }
 
 function isLegacyBundle(
   bundle: Rollup.OutputBundle,
-  options: Rollup.NormalizedOutputOptions,
+  _options: Rollup.NormalizedOutputOptions,
 ) {
-  if (options.format === 'system') {
-    const entryChunk = Object.values(bundle).find(
-      (output) => output.type === 'chunk' && output.isEntry,
-    )
+  const entryChunk = Object.values(bundle).find(
+    (output) => output.type === 'chunk' && output.isEntry,
+  )
 
-    return Boolean(entryChunk?.fileName.includes('-legacy'))
-  }
-
-  return false
+  return !!entryChunk && entryChunk.fileName.includes('-legacy')
 }
 
 function recordAndRemovePolyfillSwcPlugin(
