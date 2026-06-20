@@ -961,7 +961,7 @@ async function buildPolyfillChunk({
 
   // associate the polyfill chunk to every entry chunk so that we can retrieve
   // the polyfill filename in index html transform
-  for (const key in bundle) {
+  for (const key of Object.keys(bundle)) {
     const chunk = bundle[key]
     if (chunk.type === 'chunk' && chunk.facadeModuleId) {
       facadeToChunkMap.set(chunk.facadeModuleId, polyfillChunk.fileName)
@@ -1045,20 +1045,20 @@ function prependModernChunkLegacyGuardPlugin(): Plugin {
 
 function isLegacyChunk(
   chunk: Rollup.RenderedChunk,
-  _options: Rollup.NormalizedOutputOptions,
+  options: Rollup.NormalizedOutputOptions,
 ) {
   return chunk.fileName.includes('-legacy')
 }
 
 function isLegacyBundle(
   bundle: Rollup.OutputBundle,
-  _options: Rollup.NormalizedOutputOptions,
+  options: Rollup.NormalizedOutputOptions,
 ) {
   const entryChunk = Object.values(bundle).find(
     (output) => output.type === 'chunk' && output.isEntry,
   )
 
-  return !!entryChunk && entryChunk.fileName.includes('-legacy')
+  return Boolean(entryChunk) && entryChunk.fileName.includes('-legacy')
 }
 
 function recordAndRemovePolyfillSwcPlugin(
